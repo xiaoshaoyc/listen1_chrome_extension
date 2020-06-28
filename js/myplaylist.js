@@ -1,159 +1,190 @@
-var myplaylist = (function() {
-    'use strict';
-
-var show_myplaylist = function() {
-    return {
-        success: function(fn){
-            var playlists = localStorage.getObject('playerlists');
-            if (playlists == null) {
-                playlists = [];
-            }
-            var result = [];
-            for (var i=0; i<playlists.length; i++) {
-                var playlist_id = playlists[i];
-                var playlist = localStorage.getObject(playlist_id);
-                if (playlist != null) {
-                    result.push(playlist)
-                }
-            }
-            return fn({'result': result});
-        }
+/* global localStorage getParameterByName */
+const myplaylistFactory = () => {
+  function getPlaylistObjectKey(playlist_type){
+    let key = '';
+    if (playlist_type == 'my') {
+      key = 'playerlists';
     }
-}
-
-var my_get_playlist = function(url, hm, se) {
-    var list_id = getParameterByName('list_id', url);
-    return {
-        success: function(fn) {
-            var playlist = localStorage.getObject(list_id);
-            fn(playlist);
-        }
-    };
-}
-
-function guid() {
-  function s4() {
-    return Math.floor((1 + Math.random()) * 0x10000)
-      .toString(16)
-      .substring(1);
+    else if (playlist_type == 'favorite'){
+      key = 'favoriteplayerlists';
+    }
+    return key;
   }
-  return s4() + s4() + '-' + s4() + '-' + s4() + '-' +
-    s4() + '-' + s4() + s4() + s4();
-}
+  function show_myplaylist(playlist_type) {
+    return {
+      success(fn) {
+        let key = getPlaylistObjectKey(playlist_type);
+        if (key == '') {
+          return fn({result:[]});
+        }
+        let playlists = localStorage.getObject(key);
+        if (playlists == null) {
+          playlists = [];
+        }
+        const result = playlists.reduce((res, id) => {
+          const playlist = localStorage.getObject(id);
+          if (playlist !== null) {
+            res.push(playlist);
+          }
+          return res;
+        }, []);
+        return fn({ result });
+      },
+    };
+  }
 
-var save_myplaylist = function(playlist) {
-    var playlists = localStorage.getObject('playerlists');
+  function get_myplaylist(url, hm, se) {
+    const list_id = getParameterByName('list_id', url);
+    return {
+      success(fn) {
+        const playlist = localStorage.getObject(list_id);
+        fn(playlist);
+      },
+    };
+  }
+
+  function guid() {
+    function s4() {
+      return Math.floor((1 + Math.random()) * 0x10000)
+        .toString(16)
+        .substring(1);
+    }
+    return `${s4() + s4()}-${s4()}-${s4()}-${
+      s4()}-${s4()}${s4()}${s4()}`;
+  }
+
+  const save_myplaylist = (playlist_type, playlist) => {
+    let key = getPlaylistObjectKey(playlist_type);
+    if (key == '') {
+      return;
+    }
+    let playlists = localStorage.getObject(key);
     if (playlists == null) {
-        playlists = [];
+      playlists = [];
     }
     // update listid
-    var playlist_id = 'myplaylist_' + guid();
-    playlist.info.id = playlist_id;
-    playlist.is_mine = 1;
+    let playlist_id = '';
+    if (playlist_type === 'my') {
+      playlist_id = `myplaylist_${guid()}`;
+      playlist.info.id = playlist_id;
+      playlist.is_mine = 1; // eslint-disable-line no-param-reassign
+    }
+    else if (playlist_type == 'favorite') {
+      playlist_id = playlist.info.id;
+      playlist.is_fav = 1;
+      // remove all tracks info, cause favorite playlist always load latest
+      delete playlist.tracks;
+    }
+    
     playlists.push(playlist_id);
-    localStorage.setObject('playerlists', playlists);
+    localStorage.setObject(key, playlists);
     localStorage.setObject(playlist_id, playlist);
-}
+  };
 
-var remove_myplaylist = function(playlist_id) {
-    var playlists = localStorage.getObject('playerlists');
+  const remove_myplaylist = (playlist_type, playlist_id) => {
+    let key = getPlaylistObjectKey(playlist_type);
+    if (key == '') {
+      return;
+    }
+    const playlists = localStorage.getObject(key);
     if (playlists == null) {
-        return;
+      return;
     }
-    var newplaylists = [];
-    for (var i=0; i<playlists.length; i++) {
-        if (playlists[i] == playlist_id) {
-            continue;
-        }
-        newplaylists.push(playlists[i]);
-    }
+    const newplaylists = playlists.filter(item => item !== playlist_id);
     localStorage.removeItem(playlist_id);
-    localStorage.setObject('playerlists', newplaylists);
-}
+    localStorage.setObject(key, newplaylists);
+  };
 
-var add_myplaylist = function(playlist_id, track) {
-    var playlist = localStorage.getObject(playlist_id);
+  function add_myplaylist(playlist_id, track) {
+    const playlist = localStorage.getObject(playlist_id);
     if (playlist == null) {
-        return;
+      return;
     }
+    // new track will always insert in beginning of playlist
     if (Array.isArray(track)) {
-        playlist.tracks = playlist.tracks.concat(track);
+      playlist.tracks = track.concat(playlist.tracks);
     } else {
-        playlist.tracks.push(track);
+      playlist.tracks.unshift(track);
     }
 
     // dedupe
-    var newTracks = [], trackIds = [];
-    playlist.tracks.forEach(function (track) {
-       if (trackIds.indexOf(track.id) === -1) {
-           newTracks.push(track);
-           trackIds.push(track.id);
-       }
+    const newTracks = [];
+    const trackIds = [];
+
+    playlist.tracks.forEach((tracki) => {
+      if (trackIds.indexOf(tracki.id) === -1) {
+        newTracks.push(tracki);
+        trackIds.push(tracki.id);
+      }
     });
     playlist.tracks = newTracks;
 
     localStorage.setObject(playlist_id, playlist);
-}
+  }
 
-var remove_from_myplaylist = function(playlist_id, track_id) {
-    var playlist = localStorage.getObject(playlist_id);
+  function remove_from_myplaylist(playlist_id, track_id) {
+    const playlist = localStorage.getObject(playlist_id);
     if (playlist == null) {
-        return;
+      return;
     }
-    var newtracks = [];
-    for (var i=0; i<playlist.tracks.length; i++) {
-        if (playlist.tracks[i].id == track_id) {
-            continue;
-        }
-        newtracks.push(playlist.tracks[i]);
-    }
+    const newtracks = playlist.tracks.filter(item => item.id !== track_id);
     playlist.tracks = newtracks;
     localStorage.setObject(playlist_id, playlist);
-}
+  }
 
-var create_myplaylist = function(playlist_title, track) {
-    var playlist = {};
-    var info = {};
+  function create_myplaylist(playlist_title, track) {
+    const playlist = {};
 
-    var info = {
-        'cover_img_url' : 'images/mycover.jpg',
-        'title': playlist_title,
-        'id': '',
-        'source_url': ''
+    const info = {
+      cover_img_url: 'images/mycover.jpg',
+      title: playlist_title,
+      id: '',
+      source_url: '',
     };
 
     playlist.is_mine = 1;
     playlist.info = info;
 
     if (Array.isArray(track)) {
-        playlist.tracks = track;
+      playlist.tracks = track;
     } else {
-        playlist.tracks = [track];
+      playlist.tracks = [track];
     }
+    
+    // notice: create only used by my playlist, favorite created by clone interface
+    save_myplaylist('my', playlist);
+  }
 
-    save_myplaylist(playlist);
-}
-
-var edit_myplaylist = function(playlist_id, title, cover_img_url) {
-    var playlist = localStorage.getObject(playlist_id);
+  function edit_myplaylist(playlist_id, title, cover_img_url) {
+    const playlist = localStorage.getObject(playlist_id);
     if (playlist == null) {
-        return;
+      return;
     }
     playlist.info.title = title;
     playlist.info.cover_img_url = cover_img_url;
     localStorage.setObject(playlist_id, playlist);
-}
+  }
 
+  function myplaylist_containers(playlist_type, list_id) {
+    let key = getPlaylistObjectKey(playlist_type);
+    if (key == '') {
+      return false;
+    }
+    let playlist = localStorage.getObject(list_id);
+    return playlist !== null && playlist.is_fav;
+  }
 
-return {
-    show_myplaylist: show_myplaylist,
-    save_myplaylist: save_myplaylist,
-    get_playlist: my_get_playlist,
-    remove_myplaylist: remove_myplaylist,
-    add_myplaylist: add_myplaylist,
-    remove_from_myplaylist: remove_from_myplaylist,
-    create_myplaylist: create_myplaylist,
-    edit_myplaylist: edit_myplaylist
+  return {
+    show_myplaylist,
+    save_myplaylist,
+    get_playlist: get_myplaylist,
+    remove_myplaylist,
+    add_myplaylist,
+    remove_from_myplaylist,
+    create_myplaylist,
+    edit_myplaylist,
+    myplaylist_containers,
+  };
 };
 
-})();
+const myplaylist = myplaylistFactory(); // eslint-disable-line no-unused-vars
